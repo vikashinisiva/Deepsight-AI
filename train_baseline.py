@@ -3,7 +3,7 @@ from torchvision import datasets, transforms, models
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
-data_dir = "crops_subset"; os.makedirs("weights", exist_ok=True)
+data_dir = "crops_improved"; os.makedirs("weights", exist_ok=True)
 batch, epochs = 32, 2
 
 tfm = transforms.Compose([
@@ -31,7 +31,7 @@ crit = nn.CrossEntropyLoss()
 print(f"Dataset: {len(ds)} images, Train: {len(train_ds)}, Val: {len(val_ds)}")
 print(f"Classes: {ds.classes}")
 
-best, best_path = 0.0, "weights/baseline.pth"
+best, best_path = 0.0, "weights/baseline_improved.pth"
 for e in range(epochs):
     m.train()
     train_loss = 0.0
