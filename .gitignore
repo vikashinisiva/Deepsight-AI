@@ -1,6 +1,37 @@
-# Dataset directories
+# === DEEPFAKE DETECTION PROJECT SPECIFIC ===
+# Dataset directories (raw videos, extracted frames, cropped faces)
 ffpp_data/
 frames/
+crops/
+crops_subset/
+
+# Training outputs
+weights/
+checkpoints/
+logs/
+runs/
+tensorboard_logs/
+
+# Dataset processing outputs
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tiff
+annotations/
+metadata/
+
+# Large model files
+*.pth
+*.pt
+*.safetensors
+*.bin
+*.ckpt
 
 # Python cache and bytecode
 __pycache__/
@@ -97,7 +128,8 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# === DEVELOPMENT ENVIRONMENT ===
+# Virtual environments
 .env
 .venv
 env/
@@ -105,24 +137,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
+conda-env/
 
 # IDE settings
 .vscode/
@@ -130,6 +145,12 @@ dmypy.json
 *.swp
 *.swo
 *~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# === SYSTEM FILES ===
 
 # OS generated files
 .DS_Store
@@ -140,28 +161,66 @@ dmypy.json
 ehthumbs.db
 Thumbs.db
 
-# Model files and datasets
+# === MACHINE LEARNING SPECIFIC ===
+# PyTorch model files
 *.h5
 *.hdf5
 *.pkl
 *.pickle
-*.pt
-*.pth
 *.onnx
 *.pb
 *.tflite
-models/
-checkpoints/
-data/
-dataset/
-datasets/
 
-# Log files
-logs/
-*.log
+# TensorFlow files
+*.tfrecord
+*.tfevents.*
+saved_model/
+
+# Experiment tracking
+wandb/
+mlruns/
+.neptune/
+comet_logs/
+
+# Data processing
+*.csv
+*.json
+*.xml
+*.yaml
+*.yml
+
+# === DEVELOPMENT ENVIRONMENT ===
 
 # Temporary files
 tmp/
 temp/
 *.tmp
 *.temp
+.cache/
+
+# === PERFORMANCE & DEBUGGING ===
+# Profiling
+*.prof
+*.cprof
+*.profile
+
+# Memory dumps
+*.dmp
+core.*
+
+# === PROJECT SPECIFIC ALLOWANCES ===
+# Keep important config files
+!config.yaml
+!requirements.txt
+!setup.py
+!pyproject.toml
+
+# Keep sample images for documentation (small files only)
+!samples/
+!examples/
+samples/*.jpg
+examples/*.jpg
+
+# Keep essential model architecture files
+!models/architectures/
+!models/configs/
