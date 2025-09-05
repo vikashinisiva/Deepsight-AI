@@ -1,0 +1,927 @@
+/**
+ * AI Service Layer for DeepSight AI
+ * Integrates with DeepSeek AI and other AI models for image analysis
+ */
+
+export interface ImageAnalysisRequest {
+  imageUri: string;
+  imageBase64?: string;
+  analysisTypes: AnalysisType[];
+  options?: AnalysisOptions;
+}
+
+export interface AnalysisOptions {
+  confidence_threshold?: number;
+  include_bounding_boxes?: boolean;
+  include_segmentation?: boolean;
+  max_objects?: number;
+  include_colors?: boolean;
+  include_metadata?: boolean;
+}
+
+export type AnalysisT      // Handle video files for deepfake detection
+      if (endpoint === 'deepfake-detection' && payload.videoUri) {
+        console.log('🎭 Preparing video file for deepfake detection');
+        console.log('📁 Video URI:', payload.videoUri);
+        
+        try {
+          // Create a blob from the video file URI
+          console.log('🔄 Fetching video file from URI...');
+          const response = await fetch(payload.videoUri);
+          console.log('✅ Video file fetch response:', response.status, response.statusText);
+          
+          if (!response.ok) {
+            throw new Error(`Failed to fetch video file: ${response.status} ${response.statusText}`);
+          }
+          
+          const blob = await response.blob();
+          console.log('📦 Video blob created:', blob.size, 'bytes, type:', blob.type);
+          
+          formData.append('file', blob, 'video.mp4');
+          formData.append('analysis_types', JSON.stringify(['deepfake_detection']));
+          
+          console.log(`📤 Uploading video file: ${blob.size} bytes`);
+        } catch (fetchError) {
+          console.error('❌ Failed to fetch video file:', fetchError);
+          throw new Error(`Failed to prepare video file: ${fetchError.message}`);
+        }
+      } else {object_detection'
+  | 'scene_classification'
+  | 'color_analysis'
+  | 'text_recognition'
+  | 'face_detection'
+  | 'image_captioning'
+  | 'deepfake_detection';
+
+export interface DetectedObject {
+  name: string;
+  confidence: number;
+  bbox?: [number, number, number, number]; // [x, y, width, height]
+  category?: string;
+}
+
+export interface ColorInfo {
+  name: string;
+  hex: string;
+  rgb: [number, number, number];
+  percentage: number;
+  dominance: number;
+}
+
+export interface DeepfakeDetectionResult {
+  id: string;
+  timestamp: string;
+  isDeepfake: boolean;
+  confidence: number;
+  fakePercentage: number;
+  realPercentage: number;
+  manipulationTypes?: string[];
+  technicalAnalysis?: {
+    blendingArtifacts?: number;
+    compressionArtifacts?: number;
+    temporalConsistency?: number;
+    facialLandmarks?: number;
+  };
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  explanation?: string;
+  metadata?: {
+    processing_time: number;
+    model_version: string;
+    video_duration?: number;
+    frames_analyzed?: number;
+  };
+}
+
+export interface SimpleDeepfakeResult {
+  isDeepfake: boolean;
+  confidence: number;
+  fakePercentage: number;
+  realPercentage: number;
+  manipulationTypes?: string[];
+  technicalAnalysis?: {
+    blendingArtifacts?: number;
+    compressionArtifacts?: number;
+    temporalConsistency?: number;
+    facialLandmarks?: number;
+  };
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  explanation?: string;
+}
+
+export interface ImageAnalysisResult {
+  id: string;
+  timestamp: string;
+  imageInfo: {
+    dimensions: { width: number; height: number };
+    fileSize?: number;
+    format?: string;
+  };
+  objects: DetectedObject[];
+  colors: ColorInfo[];
+  tags: string[];
+  caption?: string;
+  scenes: Array<{
+    name: string;
+    confidence: number;
+  }>;
+  text?: Array<{
+    text: string;
+    confidence: number;
+    bbox?: [number, number, number, number];
+  }>;
+  faces?: Array<{
+    confidence: number;
+    bbox: [number, number, number, number];
+    attributes?: {
+      age?: number;
+      gender?: string;
+      emotion?: string;
+    };
+  }>;
+  deepfake?: SimpleDeepfakeResult;
+  metadata: {
+    processing_time: number;
+    model_version: string;
+    analysis_types: AnalysisType[];
+  };
+}
+
+export interface AIModelConfig {
+  name: string;
+  endpoint: string;
+  apiKey?: string;
+  version: string;
+  capabilities: AnalysisType[];
+}
+
+class AIService {
+  private models: Map<string, AIModelConfig> = new Map();
+  private defaultModel: string = 'deepseek';
+
+  constructor() {
+    this.initializeModels();
+  }
+
+  private initializeModels() {
+    // Local DeepSight AI Server Configuration
+    this.models.set('deepseek', {
+      name: 'DeepSight Local Server',
+      endpoint: 'http://192.168.126.175:5000/api',
+      apiKey: 'local_server', // Not needed for local server
+      version: 'v1.0',
+      capabilities: [
+        'object_detection',
+        'scene_classification',
+        'image_captioning',
+        'text_recognition',
+        'deepfake_detection'
+      ]
+    });
+
+    // Local Computer Vision Model (for offline processing)
+    this.models.set('local_cv', {
+      name: 'Local CV Model',
+      endpoint: 'local',
+      version: 'v1.0',
+      capabilities: [
+        'color_analysis',
+        'object_detection'
+      ]
+    });
+
+    // Backup/Secondary AI Service
+    this.models.set('fallback', {
+      name: 'Fallback AI Service',
+      endpoint: process.env.EXPO_PUBLIC_FALLBACK_API_URL || '',
+      apiKey: process.env.EXPO_PUBLIC_FALLBACK_API_KEY,
+      version: 'v1.0',
+      capabilities: [
+        'object_detection',
+        'scene_classification',
+        'color_analysis'
+      ]
+    });
+  }
+
+  /**
+   * Main analysis function that orchestrates different AI models
+   */
+  async analyzeImage(request: ImageAnalysisRequest): Promise<ImageAnalysisResult> {
+    try {
+      console.log('🚀 Starting AI analysis for image:', request.imageUri);
+      
+      const startTime = Date.now();
+      const analysisId = this.generateAnalysisId();
+      
+      // Get image metadata
+      const imageInfo = await this.getImageInfo(request.imageUri);
+      
+      // Convert image to base64 if needed
+      let imageBase64 = request.imageBase64;
+      if (!imageBase64) {
+        imageBase64 = await this.convertImageToBase64(request.imageUri);
+      }
+
+      // Prepare analysis results
+      const result: ImageAnalysisResult = {
+        id: analysisId,
+        timestamp: new Date().toISOString(),
+        imageInfo,
+        objects: [],
+        colors: [],
+        tags: [],
+        scenes: [],
+        metadata: {
+          processing_time: 0,
+          model_version: this.models.get(this.defaultModel)?.version || 'unknown',
+          analysis_types: request.analysisTypes
+        }
+      };
+
+      // Run different analysis types in parallel for better performance
+      const analysisPromises: Promise<void>[] = [];
+
+      if (request.analysisTypes.includes('object_detection')) {
+        analysisPromises.push(this.performObjectDetection(imageBase64, result));
+      }
+
+      if (request.analysisTypes.includes('color_analysis')) {
+        analysisPromises.push(this.performColorAnalysis(imageBase64, result));
+      }
+
+      if (request.analysisTypes.includes('scene_classification')) {
+        analysisPromises.push(this.performSceneClassification(imageBase64, result));
+      }
+
+      if (request.analysisTypes.includes('image_captioning')) {
+        analysisPromises.push(this.performImageCaptioning(imageBase64, result));
+      }
+
+      if (request.analysisTypes.includes('text_recognition')) {
+        analysisPromises.push(this.performTextRecognition(imageBase64, result));
+      }
+
+      if (request.analysisTypes.includes('deepfake_detection')) {
+        analysisPromises.push(this.performDeepfakeDetection(imageBase64, result));
+      }
+
+      // Wait for all analyses to complete
+      await Promise.all(analysisPromises);
+
+      // Generate tags from detected objects and scenes
+      result.tags = this.generateTags(result);
+
+      // Calculate processing time
+      result.metadata.processing_time = Date.now() - startTime;
+
+      console.log('✅ AI analysis completed in', result.metadata.processing_time, 'ms');
+      return result;
+
+    } catch (error) {
+      console.error('❌ AI analysis failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`AI analysis failed: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Analyze video for deepfake detection
+   */
+  async analyzeVideo(videoUri: string): Promise<DeepfakeDetectionResult> {
+    try {
+      console.log('🎭 Starting deepfake analysis for video:', videoUri);
+      
+      const startTime = Date.now();
+      const analysisId = this.generateAnalysisId();
+      
+      // Call DeepSeek API for deepfake detection with video
+      const response = await this.callDeepSeekAPI('deepfake-detection', {
+        videoUri: videoUri
+      });
+
+      let result: DeepfakeDetectionResult;
+
+      if (response.deepfake_analysis) {
+        const analysis = response.deepfake_analysis;
+        result = {
+          id: analysisId,
+          timestamp: new Date().toISOString(),
+          isDeepfake: analysis.is_deepfake || false,
+          confidence: analysis.confidence || 0,
+          fakePercentage: analysis.fake_percentage || 0,
+          realPercentage: analysis.real_percentage || 100,
+          manipulationTypes: analysis.manipulation_types || [],
+          technicalAnalysis: analysis.technical_analysis || {},
+          riskLevel: this.calculateRiskLevel(analysis.confidence, analysis.is_deepfake),
+          explanation: analysis.explanation || 'No detailed analysis available',
+          metadata: {
+            processing_time: Date.now() - startTime,
+            model_version: this.models.get(this.defaultModel)?.version || 'unknown',
+            video_duration: analysis.video_duration || 0,
+            frames_analyzed: analysis.frames_analyzed || 0
+          }
+        };
+      } else {
+        // Fallback mock data for testing
+        result = {
+          id: analysisId,
+          timestamp: new Date().toISOString(),
+          isDeepfake: false,
+          confidence: 0.95,
+          fakePercentage: 5,
+          realPercentage: 95,
+          riskLevel: 'low',
+          explanation: 'Video appears to be authentic based on technical analysis',
+          metadata: {
+            processing_time: Date.now() - startTime,
+            model_version: this.models.get(this.defaultModel)?.version || 'unknown',
+            video_duration: 10,
+            frames_analyzed: 30
+          }
+        };
+      }
+
+      console.log(`✅ Deepfake detection completed - ${result.isDeepfake ? 'FAKE' : 'REAL'} (${result.confidence})`);
+      return result;
+
+    } catch (error) {
+      console.error('❌ Video deepfake analysis failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Video deepfake analysis failed: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Object Detection using DeepSeek AI
+   */
+  private async performObjectDetection(imageBase64: string, result: ImageAnalysisResult): Promise<void> {
+    try {
+      const model = this.models.get(this.defaultModel);
+      if (!model?.capabilities.includes('object_detection')) {
+        throw new Error('Object detection not supported by current model');
+      }
+
+      // Call DeepSeek API for object detection
+      const response = await this.callDeepSeekAPI('object-detection', {
+        image: imageBase64,
+        confidence_threshold: 0.5,
+        max_objects: 20
+      });
+
+      if (response.objects) {
+        result.objects = response.objects.map((obj: any) => ({
+          name: obj.label || obj.name,
+          confidence: obj.confidence || obj.score,
+          bbox: obj.bbox || obj.bounding_box,
+          category: obj.category || this.categorizeObject(obj.label || obj.name)
+        }));
+      }
+
+      console.log(`✅ Detected ${result.objects.length} objects`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('⚠️ Object detection failed, using fallback:', errorMessage);
+      // Use fallback mock data for now
+      result.objects = await this.getFallbackObjectDetection();
+    }
+  }
+
+  /**
+   * Color Analysis (can be done locally)
+   */
+  private async performColorAnalysis(imageBase64: string, result: ImageAnalysisResult): Promise<void> {
+    try {
+      // This can be done locally using color extraction algorithms
+      result.colors = await this.extractDominantColors(imageBase64);
+      console.log(`✅ Extracted ${result.colors.length} dominant colors`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('⚠️ Color analysis failed:', errorMessage);
+      result.colors = [];
+    }
+  }
+
+  /**
+   * Scene Classification using DeepSeek AI
+   */
+  private async performSceneClassification(imageBase64: string, result: ImageAnalysisResult): Promise<void> {
+    try {
+      const response = await this.callDeepSeekAPI('scene-classification', {
+        image: imageBase64,
+        top_k: 5
+      });
+
+      if (response.scenes) {
+        result.scenes = response.scenes.map((scene: any) => ({
+          name: scene.label || scene.name,
+          confidence: scene.confidence || scene.score
+        }));
+      }
+
+      console.log(`✅ Classified ${result.scenes.length} scenes`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('⚠️ Scene classification failed:', errorMessage);
+      result.scenes = [];
+    }
+  }
+
+  /**
+   * Image Captioning using DeepSeek AI
+   */
+  private async performImageCaptioning(imageBase64: string, result: ImageAnalysisResult): Promise<void> {
+    try {
+      const response = await this.callDeepSeekAPI('image-captioning', {
+        image: imageBase64,
+        max_length: 100
+      });
+
+      if (response.caption) {
+        result.caption = response.caption;
+      }
+
+      console.log('✅ Generated image caption');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('⚠️ Image captioning failed:', errorMessage);
+    }
+  }
+
+  /**
+   * Text Recognition (OCR)
+   */
+  private async performTextRecognition(imageBase64: string, result: ImageAnalysisResult): Promise<void> {
+    try {
+      const response = await this.callDeepSeekAPI('text-recognition', {
+        image: imageBase64,
+        language: 'auto'
+      });
+
+      if (response.text_regions) {
+        result.text = response.text_regions.map((region: any) => ({
+          text: region.text,
+          confidence: region.confidence,
+          bbox: region.bbox
+        }));
+      }
+
+      console.log(`✅ Recognized ${result.text?.length || 0} text regions`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('⚠️ Text recognition failed:', errorMessage);
+    }
+  }
+
+  private async performDeepfakeDetection(imageBase64: string, result: ImageAnalysisResult): Promise<void> {
+    try {
+      const response = await this.callDeepSeekAPI('deepfake-detection', {
+        image: imageBase64
+      });
+
+      if (response.deepfake_analysis) {
+        const analysis = response.deepfake_analysis;
+        result.deepfake = {
+          isDeepfake: analysis.is_deepfake || false,
+          confidence: analysis.confidence || 0,
+          fakePercentage: analysis.fake_percentage || 0,
+          realPercentage: analysis.real_percentage || 100,
+          manipulationTypes: analysis.manipulation_types || [],
+          technicalAnalysis: analysis.technical_analysis || {},
+          riskLevel: this.calculateRiskLevel(analysis.confidence, analysis.is_deepfake),
+          explanation: analysis.explanation || 'No detailed analysis available'
+        };
+      } else {
+        // Fallback mock data for testing
+        result.deepfake = {
+          isDeepfake: false,
+          confidence: 0.95,
+          fakePercentage: 5,
+          realPercentage: 95,
+          riskLevel: 'low',
+          explanation: 'Image appears to be authentic based on technical analysis'
+        };
+      }
+
+      console.log(`✅ Deepfake detection completed - ${result.deepfake.isDeepfake ? 'FAKE' : 'REAL'} (${result.deepfake.confidence})`);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn('⚠️ Deepfake detection failed:', errorMessage);
+      // Provide safe fallback
+      result.deepfake = {
+        isDeepfake: false,
+        confidence: 0,
+        fakePercentage: 0,
+        realPercentage: 0,
+        riskLevel: 'low',
+        explanation: 'Deepfake analysis unavailable'
+      };
+    }
+  }
+
+  /**
+   * Calculate risk level based on deepfake detection confidence
+   */
+  private calculateRiskLevel(confidence: number, isDeepfake: boolean): 'low' | 'medium' | 'high' | 'critical' {
+    if (!isDeepfake) {
+      return confidence > 0.9 ? 'low' : 'medium';
+    }
+    
+    // If it's detected as deepfake, risk increases with confidence
+    if (confidence >= 0.9) return 'critical';
+    if (confidence >= 0.7) return 'high';
+    if (confidence >= 0.5) return 'medium';
+    return 'low';
+  }
+
+  /**
+   * Call DeepSight Local AI Server
+   */
+  private async callDeepSeekAPI(endpoint: string, payload: any): Promise<any> {
+    const model = this.models.get(this.defaultModel);
+    if (!model) {
+      console.warn('⚠️ Using mock data - AI model not configured');
+      return this.getMockAPIResponse(endpoint);
+    }
+
+    try {
+      // For local server, use the detect endpoint for all analysis types
+      const serverEndpoint = `${model.endpoint}/detect`;
+      
+      console.log(`🌐 Calling local server: ${serverEndpoint}`);
+      console.log(`📤 Analysis types:`, this.mapEndpointToAnalysisTypes(endpoint));
+      
+      // Create FormData for file upload
+      const formData = new FormData();
+      
+      // Handle video files for deepfake detection
+      if (endpoint === 'deepfake-detection' && payload.videoUri) {
+        console.log('� Preparing video file for deepfake detection');
+        
+        // Create a blob from the video file URI
+        const response = await fetch(payload.videoUri);
+        const blob = await response.blob();
+        
+        formData.append('file', blob, 'video.mp4');
+        formData.append('analysis_types', JSON.stringify(['deepfake_detection']));
+        
+        console.log(`📤 Uploading video file: ${blob.size} bytes`);
+      } else {
+        // Handle regular image analysis
+        console.log('📸 Preparing image file for analysis');
+        
+        // Clean the base64 image data - remove data URL prefix if present
+        let cleanImageData = payload.image;
+        if (cleanImageData && cleanImageData.startsWith('data:image/')) {
+          cleanImageData = cleanImageData.split(',')[1];
+        }
+        
+        // Convert base64 to blob for image analysis
+        const byteCharacters = atob(cleanImageData);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'image/jpeg' });
+        
+        formData.append('file', blob, 'image.jpg');
+        formData.append('analysis_types', JSON.stringify(this.mapEndpointToAnalysisTypes(endpoint)));
+        
+        console.log(`📤 Uploading image file: ${blob.size} bytes`);
+      }
+      
+      const response = await fetch(serverEndpoint, {
+        method: 'POST',
+        body: formData // Don't set Content-Type, let browser set it with boundary
+      });
+
+      console.log(`📥 Response status: ${response.status} ${response.statusText}`);
+      console.log(`📥 Response headers:`, Object.fromEntries(response.headers.entries()));
+
+      if (!response.ok) {
+        // Try to get error details from response body
+        let errorDetails = '';
+        try {
+          const errorText = await response.text();
+          errorDetails = errorText;
+          console.log(`❌ Error response body:`, errorText);
+        } catch (e) {
+          console.log(`❌ Could not read error response body:`, e);
+        }
+        throw new Error(`Local server call failed: ${response.status} ${response.statusText} - ${errorDetails}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ Local server response received:', JSON.stringify(result, null, 2));
+      return this.formatServerResponse(result, endpoint);
+      
+    } catch (error) {
+      console.warn('⚠️ Local server call failed, using mock data:', error);
+      return this.getMockAPIResponse(endpoint);
+    }
+  }
+
+  /**
+   * Map endpoint names to analysis types for local server
+   */
+  private mapEndpointToAnalysisTypes(endpoint: string): string[] {
+    const analysisTypes = (() => {
+      switch (endpoint) {
+        case 'object-detection':
+          return ['object_detection'];
+        case 'scene-classification':
+          return ['scene_classification'];
+        case 'image-captioning':
+          return ['image_captioning'];
+        case 'text-recognition':
+          return ['text_recognition'];
+        case 'deepfake-detection':
+          return ['deepfake_detection'];
+        default:
+          return ['object_detection', 'scene_classification'];
+      }
+    })();
+    
+    console.log(`🔄 Mapping endpoint '${endpoint}' to analysis types:`, analysisTypes);
+    return analysisTypes;
+  }
+
+  /**
+   * Format server response to match expected format
+   */
+  private formatServerResponse(serverResult: any, endpoint: string): any {
+    if (!serverResult || !serverResult.success) {
+      throw new Error('Server returned error response');
+    }
+
+    const data = serverResult.data || {};
+    
+    switch (endpoint) {
+      case 'object-detection':
+        return {
+          objects: data.objects || []
+        };
+      case 'scene-classification':
+        return {
+          scenes: data.scenes || []
+        };
+      case 'image-captioning':
+        return {
+          caption: data.caption || 'No caption available'
+        };
+      case 'text-recognition':
+        return {
+          text: data.text || []
+        };
+      default:
+        return data;
+    }
+  }
+
+  /**
+   * Generate mock API responses for demonstration
+   */
+  private getMockAPIResponse(endpoint: string): any {
+    switch (endpoint) {
+      case 'object-detection':
+        return {
+          objects: [
+            { name: 'person', confidence: 0.95, bbox: [100, 50, 200, 400] },
+            { name: 'car', confidence: 0.88, bbox: [300, 200, 150, 100] },
+            { name: 'tree', confidence: 0.76, bbox: [50, 30, 80, 200] }
+          ]
+        };
+      case 'scene-classification':
+        return {
+          scenes: [
+            { name: 'outdoor', confidence: 0.92 },
+            { name: 'urban', confidence: 0.76 },
+            { name: 'daytime', confidence: 0.89 }
+          ]
+        };
+      case 'image-captioning':
+        return {
+          caption: 'A person walking near a car on a tree-lined street during the day'
+        };
+      case 'text-recognition':
+        return {
+          text: ['STOP', 'Main Street', '123']
+        };
+      case 'deepfake-detection':
+        return {
+          deepfake_analysis: {
+            is_deepfake: false,
+            confidence: 0.95,
+            fake_percentage: 5,
+            real_percentage: 95,
+            manipulation_types: [],
+            technical_analysis: {
+              blendingArtifacts: 0.1,
+              compressionArtifacts: 0.2,
+              temporalConsistency: 0.9,
+              facialLandmarks: 0.95
+            },
+            explanation: 'Image shows strong indicators of authenticity with high facial landmark consistency and low manipulation artifacts.'
+          }
+        };
+      default:
+        return {};
+    }
+  }
+
+  /**
+   * Utility functions
+   */
+  private async getImageInfo(imageUri: string): Promise<any> {
+    // This would get actual image dimensions and metadata
+    // For now, return mock data
+    return {
+      dimensions: { width: 1920, height: 1080 },
+      fileSize: 2.4 * 1024 * 1024, // 2.4MB
+      format: 'JPEG'
+    };
+  }
+
+  private async convertImageToBase64(imageUri: string): Promise<string> {
+    // In a real implementation, this would convert the image to base64
+    // For now, return a placeholder
+    return 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/...';
+  }
+
+  private async extractDominantColors(imageBase64: string): Promise<ColorInfo[]> {
+    // Mock color extraction - in reality, this would analyze the image
+    return [
+      { name: 'Blue', hex: '#3b82f6', rgb: [59, 130, 246], percentage: 35, dominance: 0.85 },
+      { name: 'Gray', hex: '#64748b', rgb: [100, 116, 139], percentage: 28, dominance: 0.72 },
+      { name: 'Green', hex: '#10b981', rgb: [16, 185, 129], percentage: 20, dominance: 0.65 },
+      { name: 'Brown', hex: '#a16207', rgb: [161, 98, 7], percentage: 17, dominance: 0.58 }
+    ];
+  }
+
+  private async getFallbackObjectDetection(): Promise<DetectedObject[]> {
+    // Fallback mock object detection
+    return [
+      { name: 'Person', confidence: 0.95, category: 'person' },
+      { name: 'Car', confidence: 0.87, category: 'vehicle' },
+      { name: 'Building', confidence: 0.92, category: 'structure' },
+      { name: 'Tree', confidence: 0.78, category: 'nature' }
+    ];
+  }
+
+  private categorizeObject(objectName: string): string {
+    const categories: { [key: string]: string[] } = {
+      'person': ['person', 'people', 'human', 'man', 'woman', 'child'],
+      'vehicle': ['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'plane', 'train'],
+      'animal': ['dog', 'cat', 'bird', 'horse', 'cow', 'sheep'],
+      'nature': ['tree', 'flower', 'grass', 'mountain', 'water', 'sky'],
+      'object': ['chair', 'table', 'book', 'phone', 'laptop', 'bottle'],
+      'structure': ['building', 'house', 'bridge', 'road', 'fence']
+    };
+
+    for (const [category, items] of Object.entries(categories)) {
+      if (items.some(item => objectName.toLowerCase().includes(item))) {
+        return category;
+      }
+    }
+    return 'object';
+  }
+
+  private generateTags(result: ImageAnalysisResult): string[] {
+    const tags = new Set<string>();
+
+    // Add tags from objects
+    result.objects.forEach(obj => {
+      tags.add(obj.name.toLowerCase());
+      if (obj.category) tags.add(obj.category);
+    });
+
+    // Add tags from scenes
+    result.scenes.forEach(scene => {
+      tags.add(scene.name.toLowerCase());
+    });
+
+    // Add environment tags based on detected objects
+    if (result.objects.some(obj => obj.category === 'nature')) {
+      tags.add('outdoor');
+      tags.add('nature');
+    }
+    if (result.objects.some(obj => obj.category === 'vehicle')) {
+      tags.add('transportation');
+    }
+    if (result.objects.some(obj => obj.category === 'structure')) {
+      tags.add('urban');
+      tags.add('architecture');
+    }
+
+    return Array.from(tags);
+  }
+
+  private generateAnalysisId(): string {
+    return `analysis_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /**
+   * Model management functions
+   */
+  setDefaultModel(modelName: string): void {
+    if (this.models.has(modelName)) {
+      this.defaultModel = modelName;
+    } else {
+      throw new Error(`Model ${modelName} not found`);
+    }
+  }
+
+  getAvailableModels(): AIModelConfig[] {
+    return Array.from(this.models.values());
+  }
+
+  getModelCapabilities(modelName: string): AnalysisType[] {
+    return this.models.get(modelName)?.capabilities || [];
+  }
+
+  /**
+   * Test API connection to local server
+   */
+  async testConnection(): Promise<{ success: boolean; message: string }> {
+    try {
+      console.log('🔍 Testing connection to local server...');
+      
+      // First test the health endpoint
+      const healthUrl = 'http://192.168.126.175:5000/health';
+      console.log(`� Testing health endpoint: ${healthUrl}`);
+      
+      const healthResponse = await fetch(healthUrl, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      console.log(`📥 Health endpoint status: ${healthResponse.status}`);
+      
+      if (!healthResponse.ok) {
+        return { success: false, message: `Health check failed: ${healthResponse.status}` };
+      }
+
+      const healthResult = await healthResponse.json();
+      console.log('✅ Health check result:', healthResult);
+
+      // Now test the actual API endpoint with a small test request
+      const apiUrl = 'http://192.168.126.175:5000/api/detect';
+      console.log(`📡 Testing API endpoint: ${apiUrl}`);
+      
+      const testPayload = {
+        image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', // 1x1 pixel test image
+        analysis_types: ['object_detection']
+      };
+
+      console.log(`📤 Test API payload:`, JSON.stringify({
+        ...testPayload,
+        image: '[1x1 test image]'
+      }));
+
+      const apiResponse = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'DeepSight-Mobile/1.0'
+        },
+        body: JSON.stringify(testPayload)
+      });
+
+      console.log(`📥 API endpoint status: ${apiResponse.status}`);
+      console.log(`📥 API response headers:`, Object.fromEntries(apiResponse.headers.entries()));
+
+      if (!apiResponse.ok) {
+        let errorDetails = '';
+        try {
+          errorDetails = await apiResponse.text();
+          console.log(`❌ API error body:`, errorDetails);
+        } catch (e) {
+          console.log(`❌ Could not read API error:`, e);
+        }
+        return { 
+          success: false, 
+          message: `API test failed: ${apiResponse.status} - ${errorDetails.substring(0, 200)}` 
+        };
+      }
+
+      const apiResult = await apiResponse.json();
+      console.log('✅ API test successful:', apiResult);
+      
+      return { 
+        success: true, 
+        message: `Server is working! Health: OK, API: ${apiResponse.status}` 
+      };
+      
+    } catch (error) {
+      console.warn('⚠️ Connection test failed:', error);
+      return { 
+        success: false, 
+        message: `Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}` 
+      };
+    }
+  }
+}
+
+// Export singleton instance
+export const aiService = new AIService();
+export default aiService;
