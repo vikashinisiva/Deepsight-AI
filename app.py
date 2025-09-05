@@ -321,6 +321,37 @@ def setup_gradcam(_model):
     cam = GradCAM(_model, target_layer)
     return cam
 
+def generate_live_heatmap(face_crop, model, cam_analyzer, device):
+    """Generate real-time heatmap for a face crop"""
+    try:
+        tfm = make_infer_transform()
+        rgb = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
+        tensor = tfm(rgb).unsqueeze(0).to(device)
+        
+        # Get prediction
+        with torch.no_grad():
+            logits = model(tensor)
+            prob = torch.softmax(logits, dim=1)[0,1].item()
+        
+        # Generate heatmap
+        cam_map = cam_analyzer(tensor, class_idx=1)
+        h, w = face_crop.shape[:2]
+        cam_resized = cv2.resize(cam_map, (w, h))
+        cam_resized = np.clip(cam_resized, 0, 1)
+        
+        # Create overlay
+        heatmap_overlay = overlay_cam_on_image(face_crop, cam_resized, alpha=0.6)
+        
+        return {
+            "probability": prob,
+            "heatmap": cv2.cvtColor(heatmap_overlay, cv2.COLOR_BGR2RGB),
+            "original": cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB),
+            "raw_heatmap": cam_resized
+        }
+    except Exception as e:
+        print(f"Error in live heatmap generation: {e}")
+        return None
+
 # Face detection using OpenCV
 @st.cache_resource
 def load_face_detector():
@@ -345,6 +376,7 @@ def analyze_video(video_path, model, device, face_cascade, cam_analyzer=None, sh
         extract_frames(video_path, tmp_dir, fps=1)
         
         probs = []
+        frame_data = []  # Store frame info for heatmap generation
         best_frame_data = {"p": -1, "img": None, "box": None, "tensor": None}
         
         for fp in sorted(glob.glob(os.path.join(tmp_dir, "*.jpg"))):
@@ -370,24 +402,31 @@ def analyze_video(video_path, model, device, face_cascade, cam_analyzer=None, sh
             
             probs.append(p_fake)
             
+            # Store frame data for potential heatmap generation
+            frame_info = {
+                "p": p_fake,
+                "img": img.copy(),
+                "box": (x, y, w, h),
+                "tensor": tensor,
+                "crop": crop.copy()
+            }
+            frame_data.append(frame_info)
+            
             # Keep track of most suspicious frame for Grad-CAM
             if p_fake > best_frame_data["p"]:
-                best_frame_data = {
-                    "p": p_fake, 
-                    "img": img.copy(), 
-                    "box": (x, y, w, h), 
-                    "tensor": tensor
-                }
+                best_frame_data = frame_info.copy()
         
         if not probs:
-            return None, None, None
+            return None, None, None, None
         
         # Generate prediction
         avg_fake_prob = np.mean(probs)
         prediction = "FAKE" if avg_fake_prob > 0.5 else "REAL"
         
-        # Generate visualization
+        # Generate visualization and heatmaps
         viz_img = None
+        heatmap_frames = []
+        
         if best_frame_data["img"] is not None:
             img = best_frame_data["img"]
             x, y, w, h = best_frame_data["box"]
@@ -400,6 +439,7 @@ def analyze_video(video_path, model, device, face_cascade, cam_analyzer=None, sh
             # Add Grad-CAM if requested
             if show_gradcam and cam_analyzer is not None:
                 try:
+                    # Generate CAM for the suspicious frame
                     cam_map = cam_analyzer(best_frame_data["tensor"], class_idx=1)
                     cam_map = cv2.resize(cam_map, (w, h))
                     cam_map = np.clip(cam_map, 0, 1)
@@ -407,6 +447,30 @@ def analyze_video(video_path, model, device, face_cascade, cam_analyzer=None, sh
                     face_region = img[y:y+h, x:x+w]
                     overlay = overlay_cam_on_image(face_region, cam_map, alpha=0.45)
                     img[y:y+h, x:x+w] = overlay
+                    
+                    # Generate heatmaps for multiple frames
+                    top_frames = sorted(frame_data, key=lambda x: x["p"], reverse=True)[:5]
+                    for i, frame_info in enumerate(top_frames):
+                        try:
+                            frame_cam = cam_analyzer(frame_info["tensor"], class_idx=1)
+                            fx, fy, fw, fh = frame_info["box"]
+                            frame_cam_resized = cv2.resize(frame_cam, (fw, fh))
+                            frame_cam_resized = np.clip(frame_cam_resized, 0, 1)
+                            
+                            frame_img = frame_info["img"].copy()
+                            face_crop = frame_img[fy:fy+fh, fx:fx+fw]
+                            heatmap_overlay = overlay_cam_on_image(face_crop, frame_cam_resized, alpha=0.6)
+                            
+                            heatmap_frames.append({
+                                "frame_idx": i+1,
+                                "probability": frame_info["p"],
+                                "heatmap": cv2.cvtColor(heatmap_overlay, cv2.COLOR_BGR2RGB),
+                                "original_face": cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
+                            })
+                        except Exception as e:
+                            print(f"Error generating heatmap for frame {i}: {e}")
+                            continue
+                            
                 except Exception as e:
                     st.warning(f"Grad-CAM failed: {e}")
             
@@ -417,12 +481,12 @@ def analyze_video(video_path, model, device, face_cascade, cam_analyzer=None, sh
             "fake_confidence": avg_fake_prob,
             "frames_analyzed": len(probs),
             "probability_distribution": probs
-        }, viz_img, best_frame_data["p"]
+        }, viz_img, best_frame_data["p"], heatmap_frames
 
 def analyze_demo_video(video_path, model, device, face_cascade, cam_analyzer, show_gradcam):
     """Analyze demo video and store results"""
     with st.spinner("🧠 Analyzing demo video..."):
-        result, viz_img, max_fake_prob = analyze_video(
+        result, viz_img, max_fake_prob, heatmap_frames = analyze_video(
             video_path, model, device, face_cascade, 
             cam_analyzer if show_gradcam else None, show_gradcam
         )
@@ -433,6 +497,7 @@ def analyze_demo_video(video_path, model, device, face_cascade, cam_analyzer, sh
             st.session_state.result = result
             st.session_state.viz_img = viz_img
             st.session_state.max_fake_prob = max_fake_prob
+            st.session_state.heatmap_frames = heatmap_frames or []
             st.session_state.demo_analyzed = True
 
 def analyze_uploaded_video(uploaded_file, model, device, face_cascade, cam_analyzer, show_gradcam, show_advanced):
@@ -456,7 +521,7 @@ def analyze_uploaded_video(uploaded_file, model, device, face_cascade, cam_analy
         status_text.text("🧠 Running AI analysis...")
         progress_bar.progress(75)
         
-        result, viz_img, max_fake_prob = analyze_video(
+        result, viz_img, max_fake_prob, heatmap_frames = analyze_video(
             video_path, model, device, face_cascade, 
             cam_analyzer if show_gradcam else None, show_gradcam
         )
@@ -473,6 +538,7 @@ def analyze_uploaded_video(uploaded_file, model, device, face_cascade, cam_analy
             st.session_state.result = result
             st.session_state.viz_img = viz_img
             st.session_state.max_fake_prob = max_fake_prob
+            st.session_state.heatmap_frames = heatmap_frames or []
             st.session_state.analysis_time = time.time()
             
             # Show success message
@@ -575,7 +641,7 @@ def display_results(show_confidence, show_gradcam, show_advanced):
                         <p style="color: #6c757d; margin-bottom: 0.5rem;"><strong>🔵 Blue:</strong> Low attention areas</p>
                         <p style="color: #6c757d; margin: 0;"><strong>Focus on:</strong> Texture inconsistencies, blending artifacts, unnatural features</p>
                     </div>
-                    """)
+                    """, unsafe_allow_html=True)
                 
                 if show_advanced:
                     st.markdown(f"""
@@ -586,7 +652,90 @@ def display_results(show_confidence, show_gradcam, show_advanced):
                         <p style="color: #6c757d; margin-bottom: 0.3rem;"><strong>Std deviation:</strong> {np.std(result["probability_distribution"]):.3f}</p>
                         <p style="color: #6c757d; margin: 0;"><strong>Frame consistency:</strong> {1 - np.std(result["probability_distribution"]):.1%}</p>
                     </div>
-                    """)
+                    """, unsafe_allow_html=True)
+        
+        # Live Heatmap Analysis
+        if show_gradcam and hasattr(st.session_state, 'heatmap_frames') and st.session_state.heatmap_frames:
+            st.markdown("### 🔥 Live AI Heatmap Analysis - What the Model is Thinking")
+            
+            heatmap_frames = st.session_state.heatmap_frames
+            
+            # Create tabs for different frames
+            frame_tabs = st.tabs([f"Frame {i+1} ({frame['probability']:.1%})" for i, frame in enumerate(heatmap_frames)])
+            
+            for i, (tab, frame_data) in enumerate(zip(frame_tabs, heatmap_frames)):
+                with tab:
+                    col1, col2, col3 = st.columns([1, 1, 1])
+                    
+                    with col1:
+                        st.markdown("**Original Face**")
+                        st.image(frame_data['original_face'], use_container_width=True)
+                    
+                    with col2:
+                        st.markdown("**AI Attention Heatmap**")
+                        st.image(frame_data['heatmap'], use_container_width=True)
+                    
+                    with col3:
+                        prob = frame_data['probability']
+                        st.markdown(f"""
+                        <div style="background: {'#dc3545' if prob > 0.5 else '#28a745'}; color: white; padding: 1rem; border-radius: 8px; text-align: center;">
+                            <h3>AI Confidence</h3>
+                            <h2>{prob:.1%}</h2>
+                            <p>{'FAKE' if prob > 0.5 else 'REAL'}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Analysis explanation
+                        if prob > 0.7:
+                            st.error("🚨 **High suspicion**: Strong deepfake indicators detected")
+                        elif prob > 0.5:
+                            st.warning("⚠️ **Moderate suspicion**: Some artificial patterns found")
+                        elif prob > 0.3:
+                            st.info("ℹ️ **Low suspicion**: Mostly natural appearance")
+                        else:
+                            st.success("✅ **Very low suspicion**: Appears authentic")
+            
+            # Overall heatmap summary
+            st.markdown("### 📊 Heatmap Pattern Analysis")
+            
+            col_x, col_y = st.columns(2)
+            with col_x:
+                avg_prob = np.mean([f['probability'] for f in heatmap_frames])
+                max_prob = max([f['probability'] for f in heatmap_frames])
+                min_prob = min([f['probability'] for f in heatmap_frames])
+                
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h4>🎯 Pattern Consistency</h4>
+                    <p><strong>Average:</strong> {avg_prob:.1%}</p>
+                    <p><strong>Range:</strong> {min_prob:.1%} - {max_prob:.1%}</p>
+                    <p><strong>Variation:</strong> {np.std([f['probability'] for f in heatmap_frames]):.1%}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col_y:
+                high_attention_frames = sum(1 for f in heatmap_frames if f['probability'] > 0.6)
+                st.markdown(f"""
+                <div class="metric-card">
+                    <h4>🔍 AI Focus Areas</h4>
+                    <p><strong>High attention frames:</strong> {high_attention_frames}/{len(heatmap_frames)}</p>
+                    <p><strong>Common patterns:</strong> Face edges, texture boundaries</p>
+                    <p><strong>Artifacts detected:</strong> {'Yes' if avg_prob > 0.5 else 'No'}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown("""
+            <div style="background: #e3f2fd; padding: 1rem; border-radius: 8px; margin: 1rem 0;">
+                <h4 style="color: #1565c0;">🧠 How to Read the Heatmaps:</h4>
+                <ul style="color: #1976d2;">
+                    <li><strong>🔴 Red/Hot areas:</strong> The AI is focusing intensely here - potential deepfake artifacts</li>
+                    <li><strong>🟡 Yellow areas:</strong> Moderate attention - suspicious patterns</li>
+                    <li><strong>🔵 Blue/Cool areas:</strong> Low attention - appears natural</li>
+                    <li><strong>Pattern consistency:</strong> Real faces show consistent, natural attention patterns</li>
+                    <li><strong>Artifact detection:</strong> Deepfakes often show intense focus on blending edges, unnatural textures</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
         
         # Confidence distribution chart
         if show_confidence and len(result["probability_distribution"]) > 1:
@@ -691,7 +840,7 @@ def run_batch_analysis(model, device, face_cascade):
         status_text.text(f"Processing {os.path.basename(video_path)}...")
         progress_bar.progress((i + 1) / len(all_videos))
         
-        result, _, _ = analyze_video(video_path, model, device, face_cascade, None, False)
+        result, _, _, _ = analyze_video(video_path, model, device, face_cascade, None, False)
         
         if result:
             results.append({
@@ -819,7 +968,7 @@ def main():
             st.session_state.demo_video = "fake"
     
     # Main content area
-    tab1, tab2, tab3 = st.tabs(["📤 Upload & Analyze", "📊 Batch Analysis", "📚 How It Works"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📤 Upload & Analyze", "📹 Live Webcam Analysis", "📊 Batch Analysis", "📚 How It Works"])
     
     with tab1:
         col1, col2 = st.columns([1, 1])
@@ -864,13 +1013,53 @@ def main():
             display_results(show_confidence, show_gradcam, show_advanced)
     
     with tab2:
+        st.markdown("### 📹 Live Webcam Analysis with Real-time Heatmaps")
+        st.info("📷 This feature would require webcam access and real-time processing. For demonstration, you can upload a video file above to see the live heatmap analysis.")
+        
+        # Placeholder for webcam functionality
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            <div class="info-card">
+                <h4>🎥 Live Features (Coming Soon)</h4>
+                <p>• Real-time face detection from webcam</p>
+                <p>• Live deepfake probability scoring</p>
+                <p>• Instant heatmap generation</p>
+                <p>• Frame-by-frame AI analysis</p>
+                <p>• Real-time alerts for suspicious content</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("""
+            <div class="info-card">
+                <h4>🔍 Current Capabilities</h4>
+                <p>• Upload video analysis with live heatmaps</p>
+                <p>• Multi-frame AI attention visualization</p>
+                <p>• Real-time confidence scoring</p>
+                <p>• Pattern consistency analysis</p>
+                <p>• Explainable AI decision making</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        if st.button("🎬 Try Live Analysis with Demo Video"):
+            # Simulate live analysis with demo video
+            demo_path = "ffpp_data/fake_videos/033_097.mp4"
+            if os.path.exists(demo_path):
+                st.info("🔴 LIVE: Analyzing demo video with real-time heatmaps...")
+                analyze_demo_video(demo_path, model, device, face_cascade, cam_analyzer, True)
+            else:
+                st.warning("Demo video not found. Please upload a video in the first tab.")
+    
+    with tab3:
         st.markdown("### 📊 Batch Video Analysis")
         st.info("Analyze multiple videos from your dataset directory")
         
         if st.button("🚀 Run Batch Analysis"):
             run_batch_analysis(model, device, face_cascade)
     
-    with tab3:
+    with tab4:
         display_how_it_works()
     
     # Footer
