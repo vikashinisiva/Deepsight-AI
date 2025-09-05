@@ -505,10 +505,10 @@ def generate_live_heatmap(face_crop, model, cam_analyzer, device):
         # Get prediction
         with torch.no_grad():
             logits = model(tensor)
-            prob = torch.softmax(logits, dim=1)[0,1].item()
+            prob = torch.softmax(logits, dim=1)[0,0].item()  # Fixed: Use index 0 for fake
         
         # Generate heatmap
-        cam_map = cam_analyzer(tensor, class_idx=1)
+        cam_map = cam_analyzer(tensor, class_idx=0)  # Fixed: Use class_idx=0 for fake
         h, w = face_crop.shape[:2]
         cam_resized = cv2.resize(cam_map, (w, h))
         cam_resized = np.clip(cam_resized, 0, 1)
@@ -572,7 +572,7 @@ def analyze_video(video_path, model, device, face_cascade, cam_analyzer=None, sh
             
             with torch.no_grad():
                 logits = model(tensor)
-                p_fake = torch.softmax(logits, dim=1)[0,1].item()
+                p_fake = torch.softmax(logits, dim=1)[0,0].item()  # Fixed: Use index 0 for fake
             
             probs.append(p_fake)
             
@@ -614,7 +614,7 @@ def analyze_video(video_path, model, device, face_cascade, cam_analyzer=None, sh
             if show_gradcam and cam_analyzer is not None:
                 try:
                     # Generate CAM for the suspicious frame
-                    cam_map = cam_analyzer(best_frame_data["tensor"], class_idx=1)
+                    cam_map = cam_analyzer(best_frame_data["tensor"], class_idx=0)  # Fixed: Use class_idx=0 for fake
                     cam_map = cv2.resize(cam_map, (w, h))
                     cam_map = np.clip(cam_map, 0, 1)
                     
@@ -626,7 +626,7 @@ def analyze_video(video_path, model, device, face_cascade, cam_analyzer=None, sh
                     top_frames = sorted(frame_data, key=lambda x: x["p"], reverse=True)[:5]
                     for i, frame_info in enumerate(top_frames):
                         try:
-                            frame_cam = cam_analyzer(frame_info["tensor"], class_idx=1)
+                            frame_cam = cam_analyzer(frame_info["tensor"], class_idx=0)  # Fixed: Use class_idx=0 for fake
                             fx, fy, fw, fh = frame_info["box"]
                             frame_cam_resized = cv2.resize(frame_cam, (fw, fh))
                             frame_cam_resized = np.clip(frame_cam_resized, 0, 1)
